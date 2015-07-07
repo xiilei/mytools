@@ -24,11 +24,11 @@ type Worker struct {
 func newRequest(address string) (*http.Request, error) {
 	req, err := http.NewRequest("GET", address, nil)
 	if err != nil {
-		return req, nil
+		return nil, err
 	}
-	req.Header.Add("Accept", "text/html,application/xhtml+xml,"+
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,"+
 		"application/xml;q=0.9,image/webp,*/*;q=0.8")
-	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; widows x86_64) "+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; widows x86_64) "+
 		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.76 Safari/537.36")
 	return req, nil
 }
