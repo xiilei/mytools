@@ -58,31 +58,29 @@ func (w *Worker) Wid() int {
 }
 
 func (w *Worker) Try() {
-	line, ok := <-w.tpwd
-	if !ok {
-		fmt.Println("Recv test password failed ...")
-		return
+	for line := range w.tpwd {
+		line = strings.TrimSpace(line)
+		w.request.SetBasicAuth("admin", line)
+		resp, err := w.client.Do(w.request)
+		defer resp.Body.Close()
+		if err != nil {
+			fmt.Printf("Worker%d try password:%s err:%s\n", w.Wid(), line, err.Error())
+			return
+		}
+		if resp.StatusCode < 400 {
+			w.pwd <- line
+			return
+		}
+		fmt.Printf("Worker%d try password:%s code:%d\n", w.Wid(), line, resp.StatusCode)
 	}
-	line = strings.TrimSpace(line)
-	w.request.SetBasicAuth("admin", line)
-	resp, err := w.client.Do(w.request)
-	defer resp.Body.Close()
-	if err != nil {
-		fmt.Printf("Worker%d try password:%s err:%s\n", w.Wid(), line, err.Error())
-		return
-	}
-	if resp.StatusCode < 400 {
-		w.pwd <- line
-		return
-	}
-	fmt.Printf("Worker%d try password:%s code:%d\n", w.Wid(), line, resp.StatusCode)
+	close(w.pwd)
 }
 
 func main() {
-	maxcpus := 2 //runtime.NumCPU()
+	maxcpus := runtime.NumCPU()
 	tpwd := make(chan string, 1)
 	pwd := make(chan string, 1)
-	filename := "test.txt"
+	filename := "password.txt"
 	f, err := os.Open(filename)
 	if err != nil {
 		fmt.Println(err)
@@ -96,11 +94,12 @@ func main() {
 		for scanner.Scan() {
 			line = scanner.Text()
 			tpwd <- line
-			fmt.Printf("Scan text:%s\n", line)
+			// fmt.Printf("Scan text:%s\n", line)
 		}
 		if err := scanner.Err(); err != nil {
 			fmt.Printf("Scan error:%s\n", err.Error())
 		}
+		close(tpwd)
 	}(f, tpwd, pwd)
 
 	for i := 0; i < maxcpus-1; i++ {
@@ -115,8 +114,6 @@ func main() {
 	getpwd, ok := <-pwd
 	if ok {
 		fmt.Printf("Get password:%s\n", getpwd)
-		close(pwd)
-		close(tpwd)
 	} else {
 		fmt.Println("Get nothing")
 	}

@@ -22,4 +22,4 @@ _testmain.go
 *.exe
 *.test
 *.prof
-test.txt
+password.txt
