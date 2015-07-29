@@ -13,6 +13,7 @@ var (
 	wguid int = 0
 )
 
+// the request worker
 type Worker struct {
 	wid     int
 	client  *http.Client
@@ -57,6 +58,7 @@ func (w *Worker) Wid() int {
 	return w.wid
 }
 
+//try http
 func (w *Worker) Try() {
 	for line := range w.tpwd {
 		line = strings.TrimSpace(line)
@@ -76,9 +78,24 @@ func (w *Worker) Try() {
 	close(w.pwd)
 }
 
+func scanFile(f *os.File, tpwd chan string) {
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	var line string
+	for scanner.Scan() {
+		line = scanner.Text()
+		tpwd <- line
+		// fmt.Printf("Scan text:%s\n", line)
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("Scan error:%s\n", err.Error())
+	}
+	close(tpwd)
+}
+
 func main() {
 	maxcpus := runtime.NumCPU()
-	tpwd := make(chan string, 1)
+	tpwd := make(chan string, maxcpus-1)
 	pwd := make(chan string, 1)
 	filename := "password.txt"
 	f, err := os.Open(filename)
@@ -87,20 +104,7 @@ func main() {
 		return
 	}
 	runtime.GOMAXPROCS(maxcpus)
-	go func(f *os.File, tpwd, pwd chan string) {
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		var line string
-		for scanner.Scan() {
-			line = scanner.Text()
-			tpwd <- line
-			// fmt.Printf("Scan text:%s\n", line)
-		}
-		if err := scanner.Err(); err != nil {
-			fmt.Printf("Scan error:%s\n", err.Error())
-		}
-		close(tpwd)
-	}(f, tpwd, pwd)
+	go scanFile(f, tpwd)
 
 	for i := 0; i < maxcpus-1; i++ {
 		w, err := NewWorker("http://192.168.2.1", tpwd, pwd)
@@ -111,6 +115,7 @@ func main() {
 		}
 		go w.Try()
 	}
+
 	getpwd, ok := <-pwd
 	if ok {
 		fmt.Printf("Get password:%s\n", getpwd)
