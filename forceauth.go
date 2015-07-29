@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"runtime"
@@ -66,14 +66,14 @@ func (w *Worker) Try() {
 		resp, err := w.client.Do(w.request)
 		defer resp.Body.Close()
 		if err != nil {
-			fmt.Printf("Worker%d try password:%s err:%s\n", w.Wid(), line, err.Error())
+			log.Printf("Worker%d try password:%s err:%s\n", w.Wid(), line, err.Error())
 			return
 		}
 		if resp.StatusCode < 400 {
 			w.pwd <- line
 			return
 		}
-		fmt.Printf("Worker%d try password:%s code:%d\n", w.Wid(), line, resp.StatusCode)
+		log.Printf("Worker%d try password:%s code:%d\n", w.Wid(), line, resp.StatusCode)
 	}
 	close(w.pwd)
 }
@@ -85,10 +85,10 @@ func scanFile(f *os.File, tpwd chan string) {
 	for scanner.Scan() {
 		line = scanner.Text()
 		tpwd <- line
-		// fmt.Printf("Scan text:%s\n", line)
+		// log.Printf("Scan text:%s\n", line)
 	}
 	if err := scanner.Err(); err != nil {
-		fmt.Printf("Scan error:%s\n", err.Error())
+		log.Printf("Scan error:%s\n", err.Error())
 	}
 	close(tpwd)
 }
@@ -100,17 +100,16 @@ func main() {
 	filename := "password.txt"
 	f, err := os.Open(filename)
 	if err != nil {
-		fmt.Println(err)
-		return
+		log.Fatalln(err)
 	}
 	runtime.GOMAXPROCS(maxcpus)
 	go scanFile(f, tpwd)
 
 	for i := 0; i < maxcpus-1; i++ {
 		w, err := NewWorker("http://192.168.2.1", tpwd, pwd)
-		fmt.Printf("Start worker%d\n", w.Wid())
+		log.Printf("Start worker%d\n", w.Wid())
 		if err != nil {
-			fmt.Printf("Error:%s\n", err.Error())
+			log.Printf("Error:%s\n", err.Error())
 			continue
 		}
 		go w.Try()
@@ -118,8 +117,8 @@ func main() {
 
 	getpwd, ok := <-pwd
 	if ok {
-		fmt.Printf("Get password:%s\n", getpwd)
+		log.Printf("Get password:%s\n", getpwd)
 	} else {
-		fmt.Println("Get nothing")
+		log.Println("Get nothing")
 	}
 }
