@@ -1,3 +1,4 @@
+//only my practice in Go
 package main
 
 import (
@@ -12,8 +13,10 @@ import (
 )
 
 var (
-	wguid int = 0
-	wg    sync.WaitGroup
+	wguid  int = 0
+	wg     sync.WaitGroup
+	getpwd string
+	stop   chan int
 )
 
 // the request worker
@@ -75,12 +78,17 @@ func (w *Worker) Try() {
 			log.Printf("Worker%d try password:%s err:%s\n", w.Wid(), line, err.Error())
 			continue
 		}
+
+		log.Printf("Worker%d try password:%s code:%d\n", w.Wid(), line, resp.StatusCode)
+
 		if resp.StatusCode < 400 {
-			log.Println("Get password:", line)
+			getpwd = line
 			wg.Done()
+
+			// stop the scanner
+			stop <- 1
 			return
 		}
-		log.Printf("Worker%d try password:%s code:%d\n", w.Wid(), line, resp.StatusCode)
 	}
 	wg.Done()
 }
@@ -89,9 +97,17 @@ func scanFile(f *os.File, tpwd chan string) {
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
 	var line string
+ScanLoop:
 	for scanner.Scan() {
 		line = scanner.Text()
-		tpwd <- line
+		select {
+		case tpwd <- line:
+			continue
+		case <-stop: //waiting for stop
+			log.Printf("Scan break,last text %s\n", line)
+			break ScanLoop
+		}
+
 	}
 	if err := scanner.Err(); err != nil {
 		log.Printf("Scan error:%s\n", err.Error())
@@ -102,8 +118,10 @@ func scanFile(f *os.File, tpwd chan string) {
 func main() {
 	maxcpus := runtime.NumCPU()
 	tpwd := make(chan string, maxcpus-1)
+	stop = make(chan int, 1)
 	filename := "password.txt"
 	f, err := os.Open(filename)
+
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -122,5 +140,10 @@ func main() {
 	}
 
 	wg.Wait()
+	if getpwd != "" {
+		log.Printf("Got password:%s\n", getpwd)
+	} else {
+		log.Println("Got Nothing")
+	}
 	log.Println("Done.")
 }
